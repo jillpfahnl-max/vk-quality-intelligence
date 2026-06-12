@@ -1,0 +1,59 @@
+{
+  "fetchedAt": "2026-06-12T20:44Z",
+  "zeroOrderMerchants": [
+    "590746 : MrBeast Burger",
+    "773211 : Buddy V's Cake Slice",
+    "11134966 : Pardon My Cheesesteak",
+    "12922806 : Great American Cookies",
+    "11740912 : Man vs. Fries",
+    "11852566 : MLB Ballpark Bites"
+  ],
+  "qualityOffenders": [
+    {
+      "business": "12922806 : Great American Cookies",
+      "avgRating": 3.6,
+      "hqdrPct": 80.9,
+      "potentiallyDeactivate": true
+    },
+    {
+      "business": "11852566 : MLB Ballpark Bites",
+      "avgRating": 3.63,
+      "hqdrPct": 81.6,
+      "potentiallyDeactivate": true
+    }
+  ],
+  "flowersActivations": [
+    {
+      "week": "2026-04-20",
+      "activations": 55
+    },
+    {
+      "week": "2026-04-27",
+      "activations": 59
+    },
+    {
+      "week": "2026-05-04",
+      "activations": 75
+    },
+    {
+      "week": "2026-05-11",
+      "activations": 38
+    },
+    {
+      "week": "2026-05-18",
+      "activations": 53
+    },
+    {
+      "week": "2026-05-25",
+      "activations": 59
+    },
+    {
+      "week": "2026-06-01",
+      "activations": 46
+    },
+    {
+      "week": "2026-06-08",
+      "activations": 28
+    }
+  ]
+}

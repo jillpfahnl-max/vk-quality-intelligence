@@ -2,9 +2,12 @@ import React, { useState } from "react";
 import MetricsGrid from "./components/MetricsGrid";
 import ActivationsChart from "./components/ActivationsChart";
 import PacingBanner from "./components/PacingBanner";
+import VBAuditTable from "./components/VBAuditTable";
+import FlowersChart from "./components/FlowersChart";
 import { MOCK_DATA, OKR_KEYS } from "./data/schema";
+import sigmaData from "./data/sigmaData.json";
 
-const NAV_TABS = ["OKR Overview", "Activations & Deactivations", "Ads & Promos"];
+const NAV_TABS = ["OKR Overview", "Activations & Deactivations", "VB Audit", "Flowers"];
 
 export default function App() {
   const [activeTab, setActiveTab] = useState("OKR Overview");
@@ -12,16 +15,18 @@ export default function App() {
 
   return (
     <div style={{ minHeight: "100vh", background: "#111827", color: "#f1f5f9", fontFamily: "system-ui, sans-serif" }}>
+      {/* Header */}
       <div style={{ borderBottom: "1px solid #1f2937", padding: "0 32px" }}>
         <div style={{ maxWidth: 1200, margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "space-between", height: 56 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#3b82f6" }} />
             <span style={{ fontWeight: 700, fontSize: 18, letterSpacing: "-0.3px" }}>VK Intelligence</span>
           </div>
-          <div style={{ color: "#6b7280", fontSize: 13 }}>Last refreshed: {data.week}</div>
+          <div style={{ color: "#6b7280", fontSize: 13 }}>Sigma synced: {sigmaData.fetchedAt}</div>
         </div>
       </div>
 
+      {/* Nav tabs */}
       <div style={{ borderBottom: "1px solid #1f2937", padding: "0 32px" }}>
         <div style={{ maxWidth: 1200, margin: "0 auto", display: "flex", gap: 0 }}>
           {NAV_TABS.map((tab) => (
@@ -37,6 +42,7 @@ export default function App() {
         </div>
       </div>
 
+      {/* Content */}
       <div style={{ maxWidth: 1200, margin: "0 auto", padding: "28px 32px" }}>
         {activeTab === "OKR Overview" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
@@ -47,6 +53,7 @@ export default function App() {
             </div>
           </div>
         )}
+
         {activeTab === "Activations & Deactivations" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
             <ActivationsChart activations={data.activations} deactivations={data.deactivations} />
@@ -63,10 +70,16 @@ export default function App() {
             </div>
           </div>
         )}
-        {activeTab === "Ads & Promos" && (
-          <div style={{ color: "#6b7280", fontSize: 14, padding: 40, textAlign: "center" }}>
-            Ads & Promos section — connect Sigma data source to populate.
-          </div>
+
+        {activeTab === "VB Audit" && (
+          <VBAuditTable
+            zeroOrders={sigmaData.zeroOrderMerchants}
+            qualityOffenders={sigmaData.qualityOffenders}
+          />
+        )}
+
+        {activeTab === "Flowers" && (
+          <FlowersChart activations={sigmaData.flowersActivations} />
         )}
       </div>
     </div>
