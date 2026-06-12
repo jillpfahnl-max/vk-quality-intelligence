@@ -4,10 +4,11 @@ import ActivationsChart from "./components/ActivationsChart";
 import PacingBanner from "./components/PacingBanner";
 import VBAuditTable from "./components/VBAuditTable";
 import FlowersChart from "./components/FlowersChart";
+import MenuAudit from "./components/MenuAudit";
 import { MOCK_DATA, OKR_KEYS } from "./data/schema";
 import sigmaData from "./data/sigmaData.json";
 
-const NAV_TABS = ["OKR Overview", "Activations & Deactivations", "VB Audit", "Flowers"];
+const NAV_TABS = ["OKR Overview", "Activations & Deactivations", "VB Audit", "Flowers", "Menu Audit"];
 
 export default function App() {
   const [activeTab, setActiveTab] = useState("OKR Overview");
@@ -27,14 +28,15 @@ export default function App() {
       </div>
 
       {/* Nav tabs */}
-      <div style={{ borderBottom: "1px solid #1f2937", padding: "0 32px" }}>
-        <div style={{ maxWidth: 1200, margin: "0 auto", display: "flex", gap: 0 }}>
+      <div style={{ borderBottom: "1px solid #1f2937", padding: "0 32px", overflowX: "auto" }}>
+        <div style={{ maxWidth: 1200, margin: "0 auto", display: "flex", gap: 0, minWidth: "max-content" }}>
           {NAV_TABS.map((tab) => (
             <button key={tab} onClick={() => setActiveTab(tab)} style={{
               background: "none", border: "none", cursor: "pointer",
               padding: "14px 18px", fontSize: 14, fontWeight: 500,
               color: activeTab === tab ? "#3b82f6" : "#9ca3af",
               borderBottom: activeTab === tab ? "2px solid #3b82f6" : "2px solid transparent",
+              whiteSpace: "nowrap",
             }}>
               {tab}
             </button>
@@ -72,15 +74,14 @@ export default function App() {
         )}
 
         {activeTab === "VB Audit" && (
-          <VBAuditTable
-            zeroOrders={sigmaData.zeroOrderMerchants}
-            qualityOffenders={sigmaData.qualityOffenders}
-          />
+          <VBAuditTable zeroOrders={sigmaData.zeroOrderMerchants} qualityOffenders={sigmaData.qualityOffenders} />
         )}
 
         {activeTab === "Flowers" && (
           <FlowersChart activations={sigmaData.flowersActivations} />
         )}
+
+        {activeTab === "Menu Audit" && <MenuAudit />}
       </div>
     </div>
   );
