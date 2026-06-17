@@ -1,0 +1,15 @@
+{
+  "kind": "python",
+  "runtime": {
+    "command": "python3 -m uvicorn src.main:app --host {HOST} --port {PORT}"
+  },
+  "readiness": {
+    "kind": "http",
+    "path": "/health/readiness"
+  },
+  "env": {
+    "SNOWFLAKE_USER":      { "secret": true,  "description": "Snowflake username (FIRST.LAST@doordash.com)" },
+    "SNOWFLAKE_PASSWORD":  { "secret": true,  "description": "Snowflake password" },
+    "SNOWFLAKE_WAREHOUSE": { "secret": false, "description": "Snowflake warehouse (default: ADHOC)" }
+  }
+}
