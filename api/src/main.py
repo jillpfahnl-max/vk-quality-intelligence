@@ -1,35 +1,33 @@
 """
 VK Menu Audit API — Zerobox FastAPI backend
-POST /audit  : accepts CSV file, queries Snowflake, returns audit JSON
+POST /audit  : accepts CSV file, queries Databricks, returns audit JSON
 GET  /health/readiness : Zerobox readiness probe
 """
 
-import os, json, re, unicodedata
+import os, re, unicodedata
 from collections import defaultdict
 from datetime import datetime, timezone
 from io import StringIO
 
 import pandas as pd
-import snowflake.connector
+from databricks import sql as dbsql
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-# ── Config (all overridable via Zerobox env vars) ──────────────────────────
-SNOWFLAKE_ACCOUNT   = os.environ.get("SNOWFLAKE_ACCOUNT",   "doordash-doordash")
-SNOWFLAKE_USER      = os.environ.get("SNOWFLAKE_USER",      "")
-SNOWFLAKE_PASSWORD  = os.environ.get("SNOWFLAKE_PASSWORD",  "")
-SNOWFLAKE_WAREHOUSE = os.environ.get("SNOWFLAKE_WAREHOUSE", "ADHOC")
-SNOWFLAKE_DATABASE  = os.environ.get("SNOWFLAKE_DATABASE",  "PRODDB")
-SNOWFLAKE_SCHEMA    = os.environ.get("SNOWFLAKE_SCHEMA",    "PUBLIC")
+# ── Config ─────────────────────────────────────────────────────────────────
+DATABRICKS_HOST      = os.environ.get("DATABRICKS_HOST",      "doordash-dash.cloud.databricks.com")
+DATABRICKS_HTTP_PATH = os.environ.get("DATABRICKS_HTTP_PATH", "/sql/1.0/warehouses/2224fa0cd749c5f8")
+DATABRICKS_TOKEN     = os.environ.get("DATABRICKS_TOKEN",     "")
 
 app = FastAPI(title="VK Menu Audit API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],          # Tighten to your GitHub Pages URL in prod
+    allow_origins=["*"],
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
+
 
 # ── Readiness probe ────────────────────────────────────────────────────────
 @app.get("/health/readiness")
@@ -37,7 +35,7 @@ async def readiness():
     return {"status": "ok"}
 
 
-# ── Address parsing ─────────────────────────────────────────────────────────
+# ── Address parsing ────────────────────────────────────────────────────────
 def normalize_col(name: str) -> str:
     return re.sub(r"[^a-z0-9_]", "_", name.strip().lower())
 
@@ -68,22 +66,25 @@ def parse_addresses(csv_text: str) -> list[dict]:
     return results
 
 
-# ── Snowflake helpers ──────────────────────────────────────────────────────
+# ── Databricks helpers ─────────────────────────────────────────────────────
 def get_conn():
-    if not SNOWFLAKE_USER or not SNOWFLAKE_PASSWORD:
+    if not DATABRICKS_TOKEN:
         raise HTTPException(
             status_code=503,
-            detail="Snowflake credentials not configured. Set SNOWFLAKE_USER and SNOWFLAKE_PASSWORD in Zerobox env vars."
+            detail="Databricks token not configured. Set DATABRICKS_TOKEN in Zerobox env vars."
         )
-    return snowflake.connector.connect(
-        account=SNOWFLAKE_ACCOUNT,
-        user=SNOWFLAKE_USER,
-        password=SNOWFLAKE_PASSWORD,
-        warehouse=SNOWFLAKE_WAREHOUSE,
-        database=SNOWFLAKE_DATABASE,
-        schema=SNOWFLAKE_SCHEMA,
-        session_parameters={"QUERY_TAG": "zerobox:vk-menu-audit-api"},
+    return dbsql.connect(
+        server_hostname=DATABRICKS_HOST,
+        http_path=DATABRICKS_HTTP_PATH,
+        access_token=DATABRICKS_TOKEN,
     )
+
+def run_query(conn, sql: str) -> pd.DataFrame:
+    with conn.cursor() as cur:
+        cur.execute(sql)
+        rows = cur.fetchall()
+        cols = [d[0].lower() for d in cur.description]
+    return pd.DataFrame(rows, columns=cols)
 
 def _sq(s: str) -> str:
     return "'" + s.replace("'", "''") + "'"
@@ -93,45 +94,56 @@ def query_stores(conn, addresses: list[dict]) -> pd.DataFrame:
     for a in addresses:
         if a["street"] and a["zip"]:
             clauses.append(
-                f"(UPPER(s.street_address)=UPPER({_sq(a['street'])}) AND s.zipcode={_sq(a['zip'])})"
+                f"(UPPER(addr.STREET_ADDRESS)=UPPER({_sq(a['street'])}) "
+                f"AND addr.POSTAL_CODE={_sq(a['zip'])})"
             )
         elif a["street"] and a["city"] and a["state"]:
             clauses.append(
-                f"(UPPER(s.street_address)=UPPER({_sq(a['street'])}) "
-                f"AND UPPER(s.city)=UPPER({_sq(a['city'])}) "
-                f"AND UPPER(s.state)=UPPER({_sq(a['state'])}))"
+                f"(UPPER(addr.STREET_ADDRESS)=UPPER({_sq(a['street'])}) "
+                f"AND UPPER(addr.LOCALITY)=UPPER({_sq(a['city'])}) "
+                f"AND UPPER(addr.ADMINISTRATIVE_AREA_LEVEL_1)=UPPER({_sq(a['state'])}))"
             )
     if not clauses:
         return pd.DataFrame()
     sql = f"""
-    SELECT s.store_id, s.business_id, s.name AS store_name,
-           s.street_address, s.city, s.state, s.zipcode AS zip,
-           COALESCE(b.is_virtual_brand, FALSE) AS is_virtual_brand,
-           b.business_name
-    FROM PRODDB.PUBLIC.STORE s
-    LEFT JOIN PRODDB.PUBLIC.BUSINESS b ON s.business_id = b.id
-    WHERE s.is_active = TRUE
+    SELECT
+        s.ID            AS store_id,
+        s.NAME          AS store_name,
+        s.BUSINESS_ID   AS business_id,
+        ds.BUSINESS_NAME AS business_name,
+        CAST(ds.IS_VIRTUAL_BRAND AS INT) AS is_virtual_brand,
+        addr.STREET_ADDRESS AS street_address,
+        addr.POSTAL_CODE    AS zip,
+        addr.LOCALITY       AS city,
+        addr.ADMINISTRATIVE_AREA_LEVEL_1 AS state
+    FROM datalake.doordash_merchant.store s
+    JOIN datalake.edw_geo.address addr ON s.ADDRESS_ID = addr.ID
+    LEFT JOIN datalake.edw_merchant.dimension_store ds ON s.ID = ds.STORE_ID
+    WHERE s.IS_ACTIVE = TRUE
       AND ({' OR '.join(clauses)})
-    ORDER BY s.store_id LIMIT 2000
+    ORDER BY s.ID
+    LIMIT 2000
     """
-    return pd.read_sql(sql, conn)
+    return run_query(conn, sql)
 
 def query_menu_items(conn, store_ids: list) -> pd.DataFrame:
     if not store_ids:
         return pd.DataFrame(columns=["store_id", "category", "item_name"])
     ids_str = ",".join(str(i) for i in store_ids)
     sql = f"""
-    SELECT mi.store_id, mc.name AS category, mi.name AS item_name
-    FROM PRODDB.PUBLIC.MENU_ITEM mi
-    JOIN PRODDB.PUBLIC.MENU_CATEGORY mc ON mi.menu_category_id = mc.id
-    WHERE mi.store_id IN ({ids_str})
-      AND mi.is_active = TRUE AND mc.is_active = TRUE
-    ORDER BY mi.store_id, mc.name, mi.name
+    SELECT
+        STORE_ID        AS store_id,
+        CATEGORY_TITLE  AS category,
+        ITEM_TITLE      AS item_name
+    FROM datalake.edw_merchant.dimension_menu_item
+    WHERE STORE_ID IN ({ids_str})
+      AND IS_ITEM_ACTIVE = TRUE
+    ORDER BY STORE_ID, CATEGORY_TITLE, ITEM_TITLE
     """
-    return pd.read_sql(sql, conn)
+    return run_query(conn, sql)
 
 
-# ── Crossover ─────────────────────────────────────────────────────────────
+# ── Crossover ──────────────────────────────────────────────────────────────
 def normalize_key(name, cat):
     def clean(s):
         s = unicodedata.normalize("NFKD", str(s)).encode("ascii", "ignore").decode()
@@ -165,7 +177,8 @@ def assemble(addresses, stores_df, items_df):
 
     stores_by_key = defaultdict(list)
     for _, s in stores_df.iterrows():
-        key = (str(s.get("street_address", "") or "").upper().strip(), str(s.get("zip", "") or "").strip())
+        key = (str(s.get("street_address", "") or "").upper().strip(),
+               str(s.get("zip", "") or "").strip())
         stores_by_key[key].append(s)
 
     output_addresses = []
@@ -177,18 +190,23 @@ def assemble(addresses, stores_df, items_df):
         for s in matched:
             sid = int(s["store_id"])
             store_list.append({
-                "storeId":   sid,
+                "storeId":    sid,
                 "businessId": int(s["business_id"]),
-                "name":       str(s["store_name"]),
-                "type":       "virtual_brand" if s["is_virtual_brand"] else "brick_and_mortar",
-                "menuItems": [{"category": c, "name": n} for c, n in store_items.get(sid, [])],
+                "name":       str(s["store_name"] or ""),
+                "type":       "virtual_brand" if int(s.get("is_virtual_brand") or 0) else "brick_and_mortar",
+                "menuItems":  [{"category": c, "name": n} for c, n in store_items.get(sid, [])],
             })
 
-        items_for_xover = {s["storeId"]: [(it["category"], it["name"]) for it in s["menuItems"]] for s in store_list if s["menuItems"]}
+        items_for_xover = {
+            s["storeId"]: [(it["category"], it["name"]) for it in s["menuItems"]]
+            for s in store_list if s["menuItems"]
+        }
         crossover_raw = compute_crossover(items_for_xover)
         sid_name = {s["storeId"]: s["name"] for s in store_list}
         crossover = [
-            {**r, "storeA": sid_name.get(r["storeAId"], r["storeAId"]), "storeB": sid_name.get(r["storeBId"], r["storeBId"])}
+            {**r,
+             "storeA": sid_name.get(r["storeAId"], r["storeAId"]),
+             "storeB": sid_name.get(r["storeBId"], r["storeBId"])}
             for r in crossover_raw
         ]
 
@@ -217,9 +235,9 @@ async def run_audit(file: UploadFile = File(...)):
 
     conn = get_conn()
     try:
-        stores_df  = query_stores(conn, addresses)
-        store_ids  = stores_df["store_id"].astype(int).tolist() if not stores_df.empty else []
-        items_df   = query_menu_items(conn, store_ids)
+        stores_df = query_stores(conn, addresses)
+        store_ids = stores_df["store_id"].astype(int).tolist() if not stores_df.empty else []
+        items_df  = query_menu_items(conn, store_ids)
     finally:
         conn.close()
 
